@@ -1,0 +1,52 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.pdb
+
+# Virtualenv / pyenv
+.venv/
+env/
+venv/
+.pyenv/
+*.env
+
+# ===== OS files =====
+.DS_Store
+Thumbs.db
+
+# ===== Logs & caches =====
+*.log
+*.tmp
+*.swp
+.cache/
+*.sqlite3
+
+# ===== Build / distribution =====
+build/
+dist/
+*.spec
+*.egg-info/
+*.egg
+
+# ===== App specific =====
+# Modelos descargados por Coqui TTS
+~/.local/share/tts/
+output/tmp/
+output/*.wav
+
+# Configuración local y temporal
+config/*.json
+config/*.ini
+
+# ===== IDE =====
+.vscode/
+.idea/
+
+# ===== Tests =====
+.coverage
+htmlcov/
+.tox/
+pytest_cache/
