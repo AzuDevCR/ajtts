@@ -36,6 +36,7 @@ dist/
 ~/.local/share/tts/
 output/tmp/
 output/*.wav
+app/assets/
 
 # Configuración local y temporal
 config/*.json
