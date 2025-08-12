@@ -1,4 +1,5 @@
 import sys, os
+import threading
 import time
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout,
@@ -6,7 +7,7 @@ from PySide6.QtWidgets import (
     QComboBox
 )
 from PySide6.QtGui import QAction, QPixmap, QKeySequence, QShortcut
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer, QObject, Signal, QThread
 
 # from model_manager_ui import ModelManagerWindow
 from tts_engine import AquaTTS
@@ -44,11 +45,53 @@ class MessageManager:
         self.active = ""
         self.view.setText(self.idle)
 
+class PreloadWorker(QObject):
+    progress = Signal(str)
+    finished = Signal(bool)
+
+    def __init__(self, models):
+        super().__init__()
+        self.models = models
+
+    def run(self):
+        def _log(msg):
+            self.progress.emit(str(msg))
+        try:
+            ok = ensure_preinstalled_models(self.models, log=_log)
+            self.finished.emit(bool(ok))
+        except Exception as e:
+            self.progress.emit(f"Preload error: {e}")
+            self.finished.emit(False)
+
+class SpeakWorker(QObject):
+    progress = Signal(str)
+    finished = Signal(bool)
+
+    def __init__(self, tts_engine, text):
+        super().__init__()
+        self.tts_engine = tts_engine
+        self.text = text
+
+    def run(self):
+        try:
+            self.progress.emit("Processing text...")
+            self.text = repair_text(self.text)
+            QThread.msleep(1500)
+            self.progress.emit("Speaking...")
+            self.tts_engine.speak_text(self.text)
+            self.finished.emit(True)
+        except Exception as e:
+            self.progress.emit(f"Error: {e}")
+            self.finished.emit(False)
+
 class AquaJupiterGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AquaJupiterTTS")
         self.setFixedSize(770, 385)
+
+        self.speaking = False
+        self.last_text = None
 
         # --- Menu ---
         # menu_bar = QMenuBar()
@@ -61,17 +104,17 @@ class AquaJupiterGUI(QMainWindow):
         # menu_bar.addMenu(settings_menu)
         # self.setMenuBar(menu_bar)
 
-        # --- Central Widget ---
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-
-        main_layout = QVBoxLayout(central_widget)
-
         # --- Top bar (Optional, visual divider) ---
         # top_bar = QLabel("AquaJupiterTTS Interface")
         # top_bar.setAlignment(Qt.AlignCenter)
         # top_bar.setStyleSheet("font-size: 18px; color: #8cf; padding: 8px;")
         # main_layout.addWidget(top_bar)
+
+        # --- Central Widget ---
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        main_layout = QVBoxLayout(central_widget)
 
         # --- Top bar ---
         top_bar = QHBoxLayout()
@@ -83,15 +126,12 @@ class AquaJupiterGUI(QMainWindow):
         #More voices here Optional
         #self.voice_combo.addItem("English - Jenny", "tts_models/en/jenny/jenny")
 
-        self.voice_combo.currentIndexChanged.connect(
-            lambda idx: self.set_active_model(self.voice_combo.itemData(idx))
-        )
-
-        btn_speak = QPushButton("Speak (Ctrl+Shift+S)")
-        btn_speak.clicked.connect(self.speak_from_clipboard)
+        self.speak_btn = QPushButton("Speak (Ctrl+Shift+S)")
+        self.speak_btn.clicked.connect(self.speak_from_clipboard)
+        self.speak_btn.setEnabled(False)
 
         top_bar.addWidget(self.voice_combo, 1)
-        top_bar.addWidget(btn_speak, 0)
+        top_bar.addWidget(self.speak_btn, 0)
 
         top_bar_container = QWidget()
         top_bar_container.setLayout(top_bar)
@@ -150,30 +190,28 @@ class AquaJupiterGUI(QMainWindow):
         self.msg = MessageManager(self.status_box, idle="Clip → Speak. Press Ctrl+Shift+S.")
         bottom_bar.addWidget(self.status_box, stretch=3)
 
+        self.preload_thread = QThread(self)
+        self.preload_worker = PreloadWorker(BUILTIN_MODELS)
+        self.preload_worker.moveToThread(self.preload_thread)
+
+        self.preload_thread.started.connect(self.preload_worker.run)
+        self.preload_worker.progress.connect(self.msg.show)
+        self.preload_worker.finished.connect(lambda ok: self.msg.show("Voices ready." if ok else "Some voices could not be prepared."))
+        self.preload_worker.finished.connect(self._on_preload_finished)
+
+        # Cleaning
+        self.preload_worker.finished.connect(self.preload_thread.quit)
+        self.preload_worker.finished.connect(self.preload_worker.deleteLater)
+        self.preload_thread.finished.connect(self.preload_thread.deleteLater)
+
+        self.msg.show("Preparing built-in voices (first run only)...")
+        self.preload_thread.start()
+
         donate_button = QPushButton("Donate")
         donate_button.setMaximumWidth(100)
         bottom_bar.addWidget(donate_button)
 
         main_layout.addLayout(bottom_bar)
-
-        try:
-            if hasattr(self, "msg"):
-                self.msg.show("Preparing built-in voices (first run only)...")
-                logger = self.msg.show
-            else:
-                logger = print
-
-            ok = ensure_preinstalled_models(BUILTIN_MODELS, log=logger)
-            if not ok:
-                logger("Some voices could not be prepared. Check internet / disk space.")
-            else:
-                logger("Voices ready.")
-
-        except Exception as e:
-            if hasattr(self, "msg"):
-                self.msg.show(f"Error preparing voices: {e}")
-            else:
-                print(f"[ERROR] {e}")
 
         self.voice_combo.clear()
         self.voice_combo.addItem("Español — CSS10 (VITS)", "tts_models/es/css10/vits")
@@ -189,14 +227,8 @@ class AquaJupiterGUI(QMainWindow):
         self.voice_combo.currentIndexChanged.connect(
             lambda idx: self.set_active_model(self.voice_combo.itemData(idx))
         )
-        self.set_active_model(self.voice_combo.currentData())
-
-        #For testing
-        #AquaTTS("tts_models/en/jenny/jenny")
-
-        # self.tts_engine = None
-
         # self.set_active_model(self.voice_combo.currentData())
+
 
         #Shortcut
         shortcut = QShortcut(QKeySequence("Ctrl+Shift+S"), self)
@@ -209,53 +241,93 @@ class AquaJupiterGUI(QMainWindow):
     #     self.model_window.model_deleted.connect(self.on_model_deleted)
     #     self.model_window.show()
 
+    def _on_preload_finished(self, ok: bool):
+        idx = self.voice_combo.findData("tts_models/en/ljspeech/vits")
+        if idx != -1:
+            self.voice_combo.setCurrentIndex(idx)
+
+        self.set_active_model(self.voice_combo.currentData())
+
+        if hasattr(self, "speak_btn"):
+            self.speak_btn.setEnabled(True)
+
+    def speak_async(self, text: str):
+        if not text or not self.tts_engine:
+            return
+        
+        # No Overlaps
+        if self.speaking:
+            self.msg.show("Already speaking...")
+            return
+        
+        # A new thread for every new speech
+        thread = QThread(self)
+        worker = SpeakWorker(self.tts_engine, text)
+        worker.moveToThread(thread)
+
+        # Save refs and flags
+        self.speak_thread = thread
+        self.speak_worker = worker
+
+        # Signals
+        thread.started.connect(lambda: setattr(self, "speaking", True))
+        thread.started.connect(worker.run)
+        worker.progress.connect(self.msg.show)
+        worker.finished.connect(lambda ok: self.msg.show("Ready." if ok else "Error while speaking."))
+
+        # Disable btn while speaking
+        if hasattr(self, "speak_btn"):
+            worker.progress.connect(lambda _=None: self.speak_btn.setEnabled(False))
+            worker.finished.connect(lambda _=None: self.speak_btn.setEnabled(True))
+
+        # Cleaning
+        worker.finished.connect(lambda _=None: setattr(self, "speaking", False))
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda: setattr(self, "speak_thread", None))
+        thread.finished.connect(lambda: setattr(self, "speak_worker", None))
+        thread.finished.connect(thread.deleteLater)
+
+        thread.start()
+
     def set_active_model(self, model_name: str):
+        if not model_name:
+            return
         try:
+            from tts_engine import debug_model_status
+            self.msg.show(debug_model_status(model_name))
             self.tts_engine = AquaTTS(model_name)
             info = getattr(self.tts_engine, "loaded_info", model_name)
-            if hasattr(self, "msg"):
-                self.msg.show(f"Model selected: {info}")
-            else:
-                self.status_box.setText(f"Model selected: {info}")
+            self.msg.show(f"Model selected: {info}")
             print(f"[INFO] Active model set to: {info}")
         except Exception as e:
-            if hasattr(self, "msg"):
-                self.msg.show(f"Error loading model: {e}")
-            else:
-                self.status_box.setText(f"Error loading model: {e}")
+            self.msg.show(f"Error loading model: {e}")
             print(f"[ERROR] {e}")
 
     def speak_from_clipboard(self):
-        if not self.tts_engine:
-            print("No model selected. Please choose one from Manage Models.")
+        if not getattr(self, "tts_engine", None):
             self.msg.show("No model selected.")
             return
 
         clipboard = QApplication.clipboard()
         mime = clipboard.mimeData()
-        self.msg.show("Processing text...")
+        
         if mime.hasText():
-            
             raw_text = mime.text()
             fixed_text = repair_text(raw_text)
-            
-            self.tts_engine.speak_text(fixed_text)
-            self.msg.show("Speaking...")
-            self.msg.show("Done.")
+            self.speak_async(fixed_text)
+            self.last_text = fixed_text
         elif self.tts_engine.last_text:
-            self.tts_engine.repeat_last()
+            self.speak_async(self.tts_engine.last_text)
         else:
-            print("No text in clipboard and no last text saved")
+            print("Clipboard is empty.")
 
     def repeat_last(self):
-        if not self.tts_engine:
-            self.msg.show("No model selected. Please choose one from Manage Models.")
+        if not getattr(self, "tts_engine", None):
+            self.msg.show("No model selected.")
             return
         if self.tts_engine.last_text:
-            self.msg.show("Processing last saved text...")
-            self.tts_engine.repeat_last()
-            self.msg.show("Speaking...")
-            self.msg.show("Done.")
+            self.speak_async(self.last_text or "")
         else:
             self.msg.show("No previous text to repeat.")
 

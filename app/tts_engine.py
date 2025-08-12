@@ -47,37 +47,39 @@ def _has_weights(folder: Path) -> bool:
     return has_cfg and has_w
 
 def _copy_model_tree(src: Path, dst: Path):
+    # dst.mkdir(parents=True, exist_ok=True)
+    # #Config
+    # cfg = src / "config.json"
+    # if cfg.exists():
+    #     shutil.copy2(cfg, dst / "config.json")
+    # #Weights
+    # for pat in ("*.pth", "*.pt", "*.onnx"):
+    #     for f in src.glob(pat):
+    #         shutil.copy2(f, dst / f.name)
+
     dst.mkdir(parents=True, exist_ok=True)
-    #Config
-    cfg = src / "config.json"
-    if cfg.exists():
-        shutil.copy2(cfg, dst / "config.json")
-    #Weights
-    for pat in ("*.pth", "*.pt", "*.onnx"):
+    # config
+    for name in ("config.json", "scale_stats.npy"):
+        f = src / name
+        if f.exists():
+            shutil.copy2(f, dst / f.name)
+    # pesos y extras comunes
+    for pat in ("*.pth", "*.pt", "*.onnx", "vocoder*.pth", "*.json", "*.txt"):
         for f in src.glob(pat):
+            if f.name == "config.json":  # ya copiada
+                continue
             shutil.copy2(f, dst / f.name)
 
 def ensure_model_local(model_id: str, log=None):
-    log = log or (lambda msg: None)
-    adir = _asset_dir(model_id)
-    if _has_weights(adir):
-        log(f"Found Local: {model_id}")
-        return True
-    
+    log = log or (lambda *_: None)
     cdir = _cache_dir(model_id)
-    if not _has_weights(cdir):
-        log(f"Downloading: {model_id}")
-        os.environ["COQUI_TOS_AGREED"] = "1"
-        model_manager.download_model(model_id) # -> ~/.loca/share/tts
-
-    #Copy to assets
     if _has_weights(cdir):
-        log(f"Caching to assets: {adir}")
-        _copy_model_tree(cdir, adir)
+        log(f"Cached: {model_id}")
         return True
-    
-    log(f"Could not prepare model: {model_id}")
-    return False
+    log(f"Downloading: {model_id}")
+    os.environ["COQUI_TOS_AGREED"] = "1"
+    model_manager.download_model(model_id)
+    return _has_weights(cdir)
 
 def ensure_preinstalled_models(models: list[str], log=None):
     ok_all = True
@@ -92,37 +94,29 @@ def _normalize_name(model_id: str) -> str:
 def resolve_model(id_or_path: str):
     p = Path(id_or_path)
     if p.exists():
-        model_path = None
-        config_path = None
-
-        for pat in ("*.pth", "*.pt", "*.onnx"):
-            found = list(Path(p).glob(pat))
-            if found:
-                model_path = found[0]
-                break
-
-        cfgs = list(Path(p).glob("config.json"))
-        if cfgs:
-            config_path = cfgs[0]
-        return (model_path, config_path)
+        return _find_paths_in(p)
     
+    # 1- assets
     folder =  ASSETS_MODELS_DIR / _normalize_name(id_or_path)
     if folder.exists():
-        model_path = None
-        config_path = None
-
-        for pat in ("*.pth", "*.pt", "*.onnx"):
-            hits = glob(str(folder / pat))
-            if hits:
-                model_path = Path(hits[0])
-                break
-
-        cfg = folder / "config.json"
-        if cfg.exists():
-            config_path = cfg
-        return (model_path, config_path)
+        return _find_paths_in(folder)
+    
+    # 2- cache (~/.local/share/tts/...)
+    cfolder = CACHE_DIR / _normalize_name(id_or_path)
+    if cfolder.exists():
+        return _find_paths_in(cfolder)
     
     return (None, None)
+
+def _find_paths_in(folder: Path):
+    model_path = None
+    for pat in ("*.pth","*.pt","*.onnx"):
+        hits = list(folder.glob(pat))
+        if hits:
+            model_path = hits[0]
+            break
+    config_path = folder / "config.json" if (folder / "config.json").exists() else None
+    return (model_path, config_path)
 
 # TEMP_AUDIO_DIR = Path(__file__).parent / ".." / "output" / "tmp"
 # TEMP_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
@@ -151,7 +145,8 @@ class AquaTTS:
                     progress_bar=False,
                     gpu=False
                 )
-                self.source = "local"
+                src_root = Path(model_path).parent
+                self.source = "cache" if str(src_root).startswith(str(CACHE_DIR)) else "local"
             else:
                 self.tts = TTS(model_name=model_name, progress_bar=False, gpu=False)
                 self.source = "remote"
@@ -163,6 +158,8 @@ class AquaTTS:
                 )
             else:
                 raise
+
+        self.loaded_info = f"{self.model_name} [{self.source}]"
 
         try:
             if not hasattr(self.tts, "is_multi_lingual"):
@@ -223,3 +220,19 @@ def repair_text(text: str) -> str:
     text = re.sub(r"\s+", " ", text)
 
     return text.strip()
+
+def debug_model_status(model_id: str) -> str:
+    folder = ASSETS_MODELS_DIR / _normalize_name(model_id)
+    parts = [f"[check] {model_id}",
+             f"assets_dir: {folder}",
+             f"exists: {folder.exists()}"]
+    
+    if folder.exists():
+        hits_w = []
+        for pat in ("*.pth", "*.pt", "*.onnx"):
+            hits_w += [p.name for p in folder.glob(pat)]
+        parts.append(f"weights: {hits_w or '—'}")
+        parts.append(f"has_config: {(folder / 'config.json').exists()}")
+    cdir = _cache_dir(model_id)
+    parts.append(f"cache_dir: {cdir} (exists: {cdir.exists()})")
+    return "\n".join(parts)
