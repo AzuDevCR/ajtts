@@ -173,6 +173,22 @@ class AquaTTS:
 
         self.loaded_info = f"{self.model_name} [{self.source}]"
 
+    def synthesize_to_wav(self, text: str) -> str:
+        """Returns a temporal WAV(path) with the speech do not talk"""
+        if not text:
+            raise ValueError("Empty text")
+        self.last_text = text
+
+        tmp = tempfile.NamedTemporaryFile(prefix="ajtts_", suffix=".wav", delete=False)
+        tmp_path = Path(tmp.name)
+        tmp.close()
+
+        try:
+            self.tts.tts_to_file(text=text, file_path=str(tmp_path))
+        except AttributeError:
+            raise RuntimeError("This TTS backend lacks tts_to_file(...)")
+        return str(tmp_path)
+
     def speak_text(self, text: str):
         '''Generate audio, speak, delete'''
         if not text or not text.strip():

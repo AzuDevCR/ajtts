@@ -13,6 +13,7 @@ from PySide6.QtCore import Qt, QTimer, QObject, Signal, QThread
 from tts_engine import AquaTTS
 from tts_engine import repair_text
 from tts_engine import ensure_preinstalled_models
+from playback import AudioController
 
 def getPath(relPath):
     if getattr(sys, 'frozen', False):
@@ -66,6 +67,7 @@ class PreloadWorker(QObject):
 class SpeakWorker(QObject):
     progress = Signal(str)
     finished = Signal(bool)
+    ready_wav = Signal(str)
 
     def __init__(self, tts_engine, text):
         super().__init__()
@@ -74,11 +76,9 @@ class SpeakWorker(QObject):
 
     def run(self):
         try:
-            self.progress.emit("Processing text...")
-            self.text = repair_text(self.text)
-            QThread.msleep(1500)
-            self.progress.emit("Speaking...")
-            self.tts_engine.speak_text(self.text)
+            self.progress.emit("Synthesizing...")
+            wav_path = self.tts_engine.synthesize_to_wav(self.text)
+            self.ready_wav.emit(wav_path)
             self.finished.emit(True)
         except Exception as e:
             self.progress.emit(f"Error: {e}")
@@ -92,6 +92,14 @@ class AquaJupiterGUI(QMainWindow):
 
         self.speaking = False
         self.last_text = None
+
+        self.audio = AudioController(self)
+
+        # Playback Status
+        self.audio.started.connect(lambda p: (setattr(self, "speaking", True), self.msg.show("Speaking...")))
+        self.audio.finished.connect(lambda p: (setattr(self, "speaking", False), self.msg.show("Ready.")))
+        self.audio.stopped.connect(lambda: (setattr(self, "speaking", False), self.msg.show("Ready.")))
+        self.audio.error.connect(lambda m: self.msg.show(f"Audio error: {m}"))
 
         # --- Menu ---
         # menu_bar = QMenuBar()
@@ -130,8 +138,12 @@ class AquaJupiterGUI(QMainWindow):
         self.speak_btn.clicked.connect(self.speak_from_clipboard)
         self.speak_btn.setEnabled(False)
 
+        self.btn_stop = QPushButton("Stop")
+        self.btn_stop.clicked.connect(self.audio.stop)
+
         top_bar.addWidget(self.voice_combo, 1)
         top_bar.addWidget(self.speak_btn, 0)
+        top_bar.addWidget(self.btn_stop, 0)
 
         top_bar_container = QWidget()
         top_bar_container.setLayout(top_bar)
@@ -270,10 +282,10 @@ class AquaJupiterGUI(QMainWindow):
         self.speak_worker = worker
 
         # Signals
-        thread.started.connect(lambda: setattr(self, "speaking", True))
         thread.started.connect(worker.run)
         worker.progress.connect(self.msg.show)
-        worker.finished.connect(lambda ok: self.msg.show("Ready." if ok else "Error while speaking."))
+
+        worker.ready_wav.connect(lambda path: self.audio.play(path))
 
         # Disable btn while speaking
         if hasattr(self, "speak_btn"):
@@ -281,11 +293,9 @@ class AquaJupiterGUI(QMainWindow):
             worker.finished.connect(lambda _=None: self.speak_btn.setEnabled(True))
 
         # Cleaning
-        worker.finished.connect(lambda _=None: setattr(self, "speaking", False))
+        
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(lambda: setattr(self, "speak_thread", None))
-        thread.finished.connect(lambda: setattr(self, "speak_worker", None))
         thread.finished.connect(thread.deleteLater)
 
         thread.start()
