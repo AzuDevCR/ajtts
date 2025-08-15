@@ -158,24 +158,32 @@ class AquaJupiterGUI(QMainWindow):
         left_panel.setAlignment(Qt.AlignTop)
 
         # Pitch Dial
-        pitch_dial = QDial()
-        pitch_dial.setNotchesVisible(True)
-        pitch_label = QLabel("P")
-        pitch_label.setAlignment(Qt.AlignCenter)
-        left_panel.addWidget(pitch_dial)
-        left_panel.addWidget(pitch_label)
+        self.dial_rate = QDial()
+        self.dial_rate.setNotchesVisible(True)
+        self.dial_rate.setWrapping(False)
+        self.dial_rate.setRange(50, 200)
+        self.dial_rate.setValue(200)
+        rate_label = QLabel("Speed")
+        rate_label.setAlignment(Qt.AlignCenter)
+        self.dial_rate.valueChanged.connect(lambda v: self.audio.set_rate(v / 100.0))
+        left_panel.addWidget(self.dial_rate)
+        left_panel.addWidget(rate_label)
 
         # Repeat Button
-        repeat_button = QPushButton("R")
+        repeat_button = QPushButton("Repeat")
         left_panel.addWidget(repeat_button)
         repeat_button.clicked.connect(self.repeat_last)
 
         # Volume Dial
-        volume_dial = QDial()
-        volume_dial.setNotchesVisible(True)
-        volume_label = QLabel("V")
+        self.dial_volume = QDial()
+        self.dial_volume.setNotchesVisible(True)
+        self.dial_volume.setWrapping(False)
+        self.dial_volume.setRange(0, 100)
+        self.dial_volume.setValue(100)
+        volume_label = QLabel("Volume")
         volume_label.setAlignment(Qt.AlignCenter)
-        left_panel.addWidget(volume_dial)
+        self.dial_volume.valueChanged.connect(lambda v: self.audio.set_volume(v))
+        left_panel.addWidget(self.dial_volume)
         left_panel.addWidget(volume_label)
 
         content_layout.addLayout(left_panel)
