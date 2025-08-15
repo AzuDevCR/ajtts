@@ -6,8 +6,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QCheckBox, QDial, QMenuBar, QMenu, QTextEdit, QProgressDialog,
     QComboBox
 )
-from PySide6.QtGui import QAction, QPixmap, QKeySequence, QShortcut
-from PySide6.QtCore import Qt, QTimer, QObject, Signal, QThread
+from PySide6.QtGui import QAction, QPixmap, QKeySequence, QShortcut, QPalette, QBrush
+from PySide6.QtCore import Qt, QTimer, QObject, Signal, QThread, QEvent
 
 # from model_manager_ui import ModelManagerWindow
 from tts_engine import AquaTTS
@@ -87,8 +87,14 @@ class SpeakWorker(QObject):
 class AquaJupiterGUI(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        BTN_W, BTN_H = 140, 36
+        DIAL_SIZE = 72
+        PADDING = 10
+        SPACING = 8
+
         self.setWindowTitle("AquaJupiterTTS")
-        self.setFixedSize(770, 385)
+        self.setFixedSize(770, 285)
 
         self.speaking = False
         self.last_text = None
@@ -122,28 +128,43 @@ class AquaJupiterGUI(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
+        # Background
+        central_widget.setAutoFillBackground(True)
+        central_widget.setContentsMargins(0,0,0,0)
+        self._bg_path = getPath("config/backgrounds/rack_bg1.png")
+        self._bg_pix = QPixmap(self._bg_path) if self._bg_path else None
+        central_widget.installEventFilter(self)
+
         main_layout = QVBoxLayout(central_widget)
+
+        main_layout.setContentsMargins(PADDING, PADDING, PADDING, PADDING)
+        main_layout.setSpacing(SPACING)
 
         # --- Top bar ---
         top_bar = QHBoxLayout()
-        self.voice_combo = QComboBox()
+        top_bar.setSpacing(SPACING)
 
-        #Model IDs
-        self.voice_combo.addItem("Español - Vits", "tts_models/es/css10/vits")
-        self.voice_combo.addItem("English - LjSpeech Vits--Neon", "tts_models/en/ljspeech/vits/neon")
-        #More voices here Optional
-        #self.voice_combo.addItem("English - Jenny", "tts_models/en/jenny/jenny")
+        self.voice_combo = QComboBox()
+        self.voice_combo.setMinimumWidth(260)
 
         self.speak_btn = QPushButton("Speak (Ctrl+Shift+S)")
+        self.speak_btn.setFixedSize(BTN_W, BTN_H)
         self.speak_btn.clicked.connect(self.speak_from_clipboard)
         self.speak_btn.setEnabled(False)
 
         self.btn_stop = QPushButton("Stop")
+        self.btn_stop.setFixedSize(BTN_W, BTN_H)
         self.btn_stop.clicked.connect(self.audio.stop)
+
+        # Repeat Button
+        repeat_button = QPushButton("Repeat")
+        repeat_button.setFixedSize(BTN_W, BTN_H)
+        repeat_button.clicked.connect(self.repeat_last)
 
         top_bar.addWidget(self.voice_combo, 1)
         top_bar.addWidget(self.speak_btn, 0)
         top_bar.addWidget(self.btn_stop, 0)
+        top_bar.addWidget(repeat_button)
 
         top_bar_container = QWidget()
         top_bar_container.setLayout(top_bar)
@@ -151,28 +172,30 @@ class AquaJupiterGUI(QMainWindow):
 
         # --- Main content area ---
         content_layout = QHBoxLayout()
+        content_layout.setSpacing(SPACING)
+
         main_layout.addLayout(content_layout, stretch=1)
 
         # --- Left Panel ---
         left_panel = QVBoxLayout()
         left_panel.setAlignment(Qt.AlignTop)
+        left_panel.setSpacing(SPACING)
 
-        # Pitch Dial
+        # Speed (rate)
         self.dial_rate = QDial()
         self.dial_rate.setNotchesVisible(True)
         self.dial_rate.setWrapping(False)
-        self.dial_rate.setRange(50, 200)
-        self.dial_rate.setValue(200)
+        self.dial_rate.setRange(50, 150)
+        self.dial_rate.setValue(100)
+        self.dial_rate.setFixedSize(DIAL_SIZE, DIAL_SIZE)
+
         rate_label = QLabel("Speed")
         rate_label.setAlignment(Qt.AlignCenter)
-        self.dial_rate.valueChanged.connect(lambda v: self.audio.set_rate(v / 100.0))
-        left_panel.addWidget(self.dial_rate)
-        left_panel.addWidget(rate_label)
+        rate_label.setFixedHeight(18)
 
-        # Repeat Button
-        repeat_button = QPushButton("Repeat")
-        left_panel.addWidget(repeat_button)
-        repeat_button.clicked.connect(self.repeat_last)
+        self.dial_rate.valueChanged.connect(lambda v: self.audio.set_rate(v / 100.0))
+        left_panel.addWidget(self.dial_rate, 0, Qt.AlignHCenter)
+        left_panel.addWidget(rate_label)
 
         # Volume Dial
         self.dial_volume = QDial()
@@ -180,10 +203,14 @@ class AquaJupiterGUI(QMainWindow):
         self.dial_volume.setWrapping(False)
         self.dial_volume.setRange(0, 100)
         self.dial_volume.setValue(100)
+        self.dial_volume.setFixedSize(DIAL_SIZE, DIAL_SIZE)
+
         volume_label = QLabel("Volume")
         volume_label.setAlignment(Qt.AlignCenter)
+        volume_label.setFixedHeight(18)
+
         self.dial_volume.valueChanged.connect(lambda v: self.audio.set_volume(v))
-        left_panel.addWidget(self.dial_volume)
+        left_panel.addWidget(self.dial_volume, 0, Qt.AlignHCenter)
         left_panel.addWidget(volume_label)
 
         content_layout.addLayout(left_panel)
@@ -191,7 +218,8 @@ class AquaJupiterGUI(QMainWindow):
         # --- Waifu Area ---
         waifu_area = QVBoxLayout()
         self.waifu_label = QLabel()
-        self.waifu_label.setPixmap(QPixmap(getPath("config/waifus/NOVA.png")).scaled(200, 250, Qt.KeepAspectRatio))
+        #.scaled(200, 250, Qt.KeepAspectRatio))
+        self.waifu_label.setPixmap(QPixmap(getPath("config/waifus/LYRA.png")))
         self.waifu_label.setAlignment(Qt.AlignCenter)
         waifu_area.addWidget(self.waifu_label)
 
@@ -205,8 +233,10 @@ class AquaJupiterGUI(QMainWindow):
 
         self.status_box = QTextEdit()
         self.status_box.setReadOnly(True)
-        self.status_box.setPlaceholderText("")
-        self.status_box.setMaximumHeight(50)
+        self.status_box.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.status_box.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.status_box.setMaximumHeight(20)
+        # self.status_box.setFrameStyle(QTextEdit.NoFrame)
         self.msg = MessageManager(self.status_box, idle="Clip → Speak. Press Ctrl+Shift+S.")
         bottom_bar.addWidget(self.status_box, stretch=3)
 
@@ -369,6 +399,44 @@ class AquaJupiterGUI(QMainWindow):
         if self.tts_engine and self.tts_engine.model_name == model_name:
             self.tts_engine = None
             self.status_box.setText("Model deleted. No model selected.")
+
+    def eventFilter(self, obj, event):
+        if obj is self.centralWidget() and event.type() == QEvent.Resize:
+            self._apply_bg()
+        return super().eventFilter(obj, event)
+    
+    def _apply_bg(self):
+        if not getattr(self, "_bg_pix", None) or self._bg_pix.isNull():
+            return
+        w = self.centralWidget()
+        scaled = self._bg_pix.scaled(
+            w.size(), 
+            Qt.IgnoreAspectRatio,          # KeepAspectRatioByExpanding 
+            Qt.SmoothTransformation
+        )
+        pal = w.palette()
+        pal.setBrush(QPalette.Window, QBrush(scaled))
+        w.setPalette(pal)
+
+    def closeEvent(self, e):
+        # Detener audio primero
+        try:
+            if hasattr(self, "audio"):
+                self.audio.stop()
+        except Exception:
+            pass
+
+        # Apagar hilos si quedara alguno corriendo
+        for name in ("speak_thread", "proc_thread", "preload_thread"):
+            th = getattr(self, name, None)
+            try:
+                if th and hasattr(th, "isRunning") and th.isRunning():
+                    th.quit()
+                    th.wait(2000)
+            except Exception:
+                pass
+
+        super().closeEvent(e)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
