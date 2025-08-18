@@ -14,6 +14,7 @@ from tts_engine import AquaTTS
 from tts_engine import repair_text
 from tts_engine import ensure_preinstalled_models
 from playback import AudioController
+from normalize_es import normalize_es_numbers
 
 def getPath(relPath):
     if getattr(sys, 'frozen', False):
@@ -24,6 +25,7 @@ def getPath(relPath):
 
 BUILTIN_MODELS = [
     "tts_models/es/css10/vits",
+    # "tts_models/en/jenny/jenny",
     "tts_models/en/ljspeech/vits",
 ]
 
@@ -264,8 +266,9 @@ class AquaJupiterGUI(QMainWindow):
         main_layout.addLayout(bottom_bar)
 
         self.voice_combo.clear()
-        self.voice_combo.addItem("Español — CSS10 (VITS)", "tts_models/es/css10/vits")
-        self.voice_combo.addItem("English — LJSpeech (VITS)", "tts_models/en/ljspeech/vits")
+        self.voice_combo.addItem("Español - CSS10 (VITS)", "tts_models/es/css10/vits")
+        # self.voice_combo.addItem("English - Jenny", "tts_models/en/jenny/jenny")
+        self.voice_combo.addItem("English - LJSpeech (VITS)", "tts_models/en/ljspeech/vits")
 
         # Default English
         for i in range(self.voice_combo.count()):
@@ -363,6 +366,13 @@ class AquaJupiterGUI(QMainWindow):
         if mime.hasText():
             raw_text = mime.text()
             fixed_text = repair_text(raw_text)
+
+            try:
+                if str(getattr(self.tts_engine, "model_name", "")).startswith("tts_models/es/"):
+                    fixed_text = normalize_es_numbers(fixed_text, currency_default="CRC")
+            except Exception as e:
+                print(f"[normalize_es] warning: {e}")
+                
             self.speak_async(fixed_text)
             self.last_text = fixed_text
         elif self.tts_engine.last_text:
