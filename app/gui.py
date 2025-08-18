@@ -1,13 +1,13 @@
 import sys, os
 import threading
-import time
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout,
-    QHBoxLayout, QCheckBox, QDial, QMenuBar, QMenu, QTextEdit, QProgressDialog,
+    QHBoxLayout, QDial, QTextEdit, QProgressDialog,
     QComboBox
 )
-from PySide6.QtGui import QAction, QPixmap, QKeySequence, QShortcut, QPalette, QBrush
-from PySide6.QtCore import Qt, QTimer, QObject, Signal, QThread, QEvent
+from PySide6.QtGui import QPixmap, QKeySequence, QShortcut, QPalette, QBrush, QDesktopServices
+from PySide6.QtCore import Qt, QObject, Signal, QThread, QEvent, QUrl
 
 # from model_manager_ui import ModelManagerWindow
 from tts_engine import AquaTTS
@@ -28,6 +28,8 @@ BUILTIN_MODELS = [
     # "tts_models/en/jenny/jenny",
     "tts_models/en/ljspeech/vits",
 ]
+
+KOFI_URL = "https://ko-fi.com/inlcreations"
 
 class MessageManager:
     def __init__(self, text_edit: QTextEdit, idle: str = ""):
@@ -261,6 +263,7 @@ class AquaJupiterGUI(QMainWindow):
 
         donate_button = QPushButton("Donate")
         donate_button.setMaximumWidth(100)
+        donate_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(KOFI_URL)))
         bottom_bar.addWidget(donate_button)
 
         main_layout.addLayout(bottom_bar)
@@ -372,7 +375,7 @@ class AquaJupiterGUI(QMainWindow):
                     fixed_text = normalize_es_numbers(fixed_text, currency_default="CRC")
             except Exception as e:
                 print(f"[normalize_es] warning: {e}")
-                
+
             self.speak_async(fixed_text)
             self.last_text = fixed_text
         elif self.tts_engine.last_text:
