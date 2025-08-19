@@ -1,7 +1,0 @@
-from TTS.tts.models.tortoise import TortoiseArgs, TortoiseAudioConfig
-  File "/home/azudevcr/.pyenv/versions/ajtts-env/lib/python3.10/site-packages/TTS/tts/models/tortoise.py", line 13, in <module>
-    from TTS.tts.layers.tortoise.arch_utils import TorchMelSpectrogram
-  File "/home/azudevcr/.pyenv/versions/ajtts-env/lib/python3.10/site-packages/TTS/tts/layers/tortoise/arch_utils.py", line 10, in <module>
-    from transformers import LogitsWarper
-ImportError: cannot import name 'LogitsWarper' from 'transformers' (/home/azudevcr/.pyenv/versions/ajtts-env/lib/python3.10/site-packages/transformers/__init__.py)
-

@@ -1,0 +1,21 @@
+.
+├── appTree
+├── assets
+│   └── models
+├── config.py
+├── gui.py
+├── __init__.py
+├── model_manager.py
+├── model_manager_ui.py
+├── normalize_es.py
+├── playback.py
+├── __pycache__
+│   ├── model_manager.cpython-310.pyc
+│   ├── model_manager_ui.cpython-310.pyc
+│   ├── normalize_es.cpython-310.pyc
+│   ├── playback.cpython-310.pyc
+│   └── tts_engine.cpython-310.pyc
+├── tts_engine.py
+└── version.py
+
+4 directories, 15 files

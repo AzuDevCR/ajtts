@@ -1,0 +1,13 @@
+#!/bin/bash
+HERE="$(dirname "$(readlink -f "$0")")"
+
+# Activamos el venv dentro del AppImage
+export PATH="$HERE/usr/venv/bin:$PATH"
+
+# Le decimos a Python dónde buscar módulos (incluyendo app/)
+export PYTHONPATH="$HERE/usr:$PYTHONPATH"
+
+# Finalmente ejecutamos la GUI
+exec python3 "$HERE/usr/app/gui.py" "$@"
+
+
