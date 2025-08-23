@@ -1,3 +1,7 @@
+# AquaJupiterTTS
+# Copyright (C) 2025  AzuDevCR (INL Creations)
+# Licensed under GPLv3 (see LICENSE file for details).
+
 import os
 
 os.environ["PYTORCH_JIT"] = "0"

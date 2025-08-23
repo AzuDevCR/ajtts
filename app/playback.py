@@ -1,3 +1,7 @@
+# AquaJupiterTTS
+# Copyright (C) 2025  AzuDevCR (INL Creations)
+# Licensed under GPLv3 (see LICENSE file for details).
+
 from PySide6.QtCore import QObject, Signal, QUrl
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 import os

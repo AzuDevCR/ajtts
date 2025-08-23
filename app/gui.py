@@ -1,3 +1,8 @@
+# AquaJupiterTTS
+# Copyright (C) 2025  AzuDevCR (INL Creations)
+# Licensed under GPLv3 (see LICENSE file for details).
+
+
 import sys, os
 import threading
 
