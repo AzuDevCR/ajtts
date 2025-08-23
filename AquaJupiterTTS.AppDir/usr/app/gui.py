@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QDial, QTextEdit, QProgressDialog,
     QComboBox
 )
-from PySide6.QtGui import QPixmap, QKeySequence, QShortcut, QPalette, QBrush, QDesktopServices
+from PySide6.QtGui import QPixmap, QKeySequence, QShortcut, QPalette, QBrush, QDesktopServices, QIcon
 from PySide6.QtCore import Qt, QObject, Signal, QThread, QEvent, QUrl
 
 # from model_manager_ui import ModelManagerWindow
@@ -15,19 +15,36 @@ from app.tts_engine import repair_text
 from app.tts_engine import ensure_preinstalled_models
 from app.playback import AudioController
 from app.normalize_es import normalize_es_numbers
+from app.normalize_en import normalize_text_en
 from app import __version__, __author__
+
+def resource_path(relative_path: str) -> str:
+    """
+    Retorna la ruta absoluta para un recurso, tanto si se corre
+    en AppImage como en venv.
+    """
+    # Cuando el programa corre como AppImage, las cosas viven en $APPDIR/usr
+    if "APPDIR" in os.environ:
+        base_path = os.path.join(os.environ["APPDIR"], "usr")
+    else:
+        # Cuando está en venv/carpeta local
+        base_path = os.path.dirname(__file__)
+        base_path = os.path.abspath(os.path.join(base_path, ".."))  # sube un nivel para alcanzar config
+
+    return os.path.join(base_path, relative_path)
 
 def getPath(relPath):
     if getattr(sys, 'frozen', False):
-        basePath = sys._MEIPASS
+        basePath = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.argv[0])
     else:
-        basePath = os.path.abspath(".")
+        basePath = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(basePath, relPath)
 
 BUILTIN_MODELS = [
     "tts_models/es/css10/vits",
-    # "tts_models/en/jenny/jenny",
-    "tts_models/en/ljspeech/vits",
+    "tts_models/en/jenny/jenny",
+    # "tts_models/en/ljspeech/vits--neon",
+    # "tts_models/en/ljspeech/vits",
 ]
 
 KOFI_URL = "https://ko-fi.com/inlcreations"
@@ -136,7 +153,7 @@ class AquaJupiterGUI(QMainWindow):
         # Background
         central_widget.setAutoFillBackground(True)
         central_widget.setContentsMargins(0,0,0,0)
-        self._bg_path = getPath("config/backgrounds/rack_bg1.png")
+        self._bg_path = resource_path("config/backgrounds/rack_bg1.png")
         self._bg_pix = QPixmap(self._bg_path) if self._bg_path else None
         central_widget.installEventFilter(self)
 
@@ -152,7 +169,7 @@ class AquaJupiterGUI(QMainWindow):
         self.voice_combo = QComboBox()
         self.voice_combo.setMinimumWidth(260)
 
-        self.speak_btn = QPushButton("Speak (Ctrl+Shift+S)")
+        self.speak_btn = QPushButton("Speak")
         self.speak_btn.setFixedSize(BTN_W, BTN_H)
         self.speak_btn.clicked.connect(self.speak_from_clipboard)
         self.speak_btn.setEnabled(False)
@@ -194,7 +211,7 @@ class AquaJupiterGUI(QMainWindow):
         self.dial_rate.setValue(100)
         self.dial_rate.setFixedSize(DIAL_SIZE, DIAL_SIZE)
 
-        rate_label = QLabel("Speed")
+        rate_label = QLabel("Speed/Pitch")
         rate_label.setAlignment(Qt.AlignCenter)
         rate_label.setFixedHeight(18)
 
@@ -224,7 +241,7 @@ class AquaJupiterGUI(QMainWindow):
         waifu_area = QVBoxLayout()
         self.waifu_label = QLabel()
         #.scaled(200, 250, Qt.KeepAspectRatio))
-        self.waifu_label.setPixmap(QPixmap(getPath("config/waifus/LYRA.png")))
+        self.waifu_label.setPixmap(QPixmap(resource_path("config/waifus/LYRA.png")))
         self.waifu_label.setAlignment(Qt.AlignCenter)
         waifu_area.addWidget(self.waifu_label)
 
@@ -271,12 +288,13 @@ class AquaJupiterGUI(QMainWindow):
 
         self.voice_combo.clear()
         self.voice_combo.addItem("Español - CSS10 (VITS)", "tts_models/es/css10/vits")
-        # self.voice_combo.addItem("English - Jenny", "tts_models/en/jenny/jenny")
-        self.voice_combo.addItem("English - LJSpeech (VITS)", "tts_models/en/ljspeech/vits")
+        self.voice_combo.addItem("English - Jenny", "tts_models/en/jenny/jenny")
+        # self.voice_combo.addItem("English - LJSpeech (VITS)", "tts_models/en/ljspeech/vits")
+        # self.voice_combo.addItem("English - LJSpeech (VITS) neon", "tts_models/en/ljspeech/vits--neon")
 
         # Default English
         for i in range(self.voice_combo.count()):
-            if self.voice_combo.itemData(i) == "tts_models/en/ljspeech/vits":
+            if self.voice_combo.itemData(i) == "tts_models/en/jenny/jenny":
                 self.voice_combo.setCurrentIndex(i)
                 break
 
@@ -284,7 +302,6 @@ class AquaJupiterGUI(QMainWindow):
         self.voice_combo.currentIndexChanged.connect(
             lambda idx: self.set_active_model(self.voice_combo.itemData(idx))
         )
-        # self.set_active_model(self.voice_combo.currentData())
 
 
         #Shortcut
@@ -299,7 +316,7 @@ class AquaJupiterGUI(QMainWindow):
     #     self.model_window.show()
 
     def _on_preload_finished(self, ok: bool):
-        idx = self.voice_combo.findData("tts_models/en/ljspeech/vits")
+        idx = self.voice_combo.findData("tts_models/en/jenny/jenny")
         if idx != -1:
             self.voice_combo.setCurrentIndex(idx)
 
@@ -372,10 +389,16 @@ class AquaJupiterGUI(QMainWindow):
             fixed_text = repair_text(raw_text)
 
             try:
-                if str(getattr(self.tts_engine, "model_name", "")).startswith("tts_models/es/"):
+                model_name = str(getattr(self.tts_engine, "model_name", "")).lower()
+                
+                if model_name.startswith("tts_models/es/"):
                     fixed_text = normalize_es_numbers(fixed_text, currency_default="CRC")
+
+                elif "jenny" in model_name:
+                    fixed_text = normalize_text_en(fixed_text)
+
             except Exception as e:
-                print(f"[normalize_es] warning: {e}")
+                print(f"[normalizer warning] {e}")
 
             self.speak_async(fixed_text)
             self.last_text = fixed_text
@@ -454,6 +477,7 @@ class AquaJupiterGUI(QMainWindow):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(resource_path("config/icon/icon.png")))
     gui = AquaJupiterGUI()
     gui.show()
     sys.exit(app.exec())

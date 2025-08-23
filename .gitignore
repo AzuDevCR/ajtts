@@ -33,12 +33,14 @@ dist/
 
 # ===== App specific =====
 # Modelos descargados por Coqui TTS
-~/.local/share/tts/
+.local/share/tts/
 output/tmp/
 output/*.wav
-app/assets/
 
-# Configuración local y temporal
+# Assets (incluir solo si no querés subirlos)
+#app/assets/
+
+# Configuración local (subir ejemplo en su lugar)
 config/*.json
 config/*.ini
 
@@ -51,3 +53,4 @@ config/*.ini
 htmlcov/
 .tox/
 pytest_cache/
+
