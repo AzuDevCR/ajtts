@@ -2,7 +2,7 @@
 # Copyright (C) 2025  AzuDevCR (INL Creations)
 # Licensed under GPLv3 (see LICENSE file for details).
 
-from PySide6.QtCore import QObject, Signal, QUrl
+from PySide6.QtCore import QObject, Signal, QUrl, QTimer
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 import os
 
@@ -22,8 +22,8 @@ class AudioController(QObject):
         self._current_path = ""
 
         # Connections
-        self._player.playbackStateChanged.connect(self._on_playback_state_changed)
-        self._player.mediaStatusChanged.connect(self._on_media_status_changed)
+        self._player.mediaStatusChanged.connect(self._on_media_status)
+        self._player.playbackStateChanged.connect(self._on_state_changed)
 
         try:
             self._player.errorOccurred.connect(self._on_error)
@@ -39,20 +39,56 @@ class AudioController(QObject):
 
     # Public API
     def play(self, file_path: str):
-        """Play a local WAV/MP3/OGG file. Replaces any current playback."""
-        if not file_path or not os.path.exists(file_path):
+        if not os.path.exists(file_path):
             self.error.emit(f"File not found: {file_path}")
             return
+        self._release_media()
         self._current_path = file_path
+        self._emitted_start = False
+        self._emitted_end   = False
         self._player.setSource(QUrl.fromLocalFile(file_path))
         self._player.play()
 
     def stop(self):
-        """Stop playback immediately"""
-        if self._player.playbackState() != QMediaPlayer.PlaybackState.StoppedState:
+        """Stop playback immediately (user action)"""
+        self._stopped_by_user = True
+        self._emitted_end = True
+
+        if self._player.playbackState() != QMediaPlayer.StoppedState:
             self._player.stop()
-            self.stopped.emit()
-            self._cleanup_file()
+        self._release_media()
+        self.stopped.emit()
+        self._schedule_cleanup()
+
+    def _on_state_changed(self, state):
+        from PySide6.QtMultimedia import QMediaPlayer
+        if state == QMediaPlayer.PlayingState and not self._emitted_start:
+            self._emitted_start = True
+            self.started.emit(self._current_path)
+        if state == QMediaPlayer.StoppedState:
+            self._maybe_finish()
+
+    def _on_media_status(self, status):
+        from PySide6.QtMultimedia import QMediaPlayer
+        if status == QMediaPlayer.EndOfMedia:
+            self._maybe_finish()
+
+    def _maybe_finish(self):
+        if self._stopped_by_user:
+            return
+        if not self._emitted_end and self._current_path:
+            self._emitted_end = True
+            self.finished.emit(self._current_path)
+            self._schedule_cleanup()
+
+    def _release_media(self):
+        try:
+            if self._player.playbackState() != QMediaPlayer.StoppedState:
+                self._player.stop()
+        except Exception:
+            pass
+
+        self._player.setSource(QUrl())
 
     def set_volume(self, vol: int):
         """Set output volume 0..100."""
@@ -79,18 +115,49 @@ class AudioController(QObject):
         elif state == QMediaPlayer.PlaybackState.StoppedState:
             pass
 
+    def _on_media_status(self, status):
+        from PySide6.QtMultimedia import QMediaPlayer
+        if status == QMediaPlayer.EndOfMedia:
+            self.finished.emit(self._current_path)
+            
+            self._schedule_cleanup()
+
+    def _schedule_cleanup(self):
+        if not getattr(self, "_auto_cleanup", True):
+            return
+        path = self._current_path
+        if not path:
+            return
+        
+        def attempt(retries=6, delay_ms=100):
+            if not os.path.exists(path):
+                return
+            try:
+                os.remove(path)
+                if self._current_path == path:
+                    self._current_path = ""
+            except FileNotFoundError:
+                return
+            except PermissionError as e:
+                if retries > 0:
+                    QTimer.singleShot(delay_ms, lambda: attempt(retries - 1, min(delay_ms * 2, 1000)))
+                else:
+                    self.error.emit(f"Could not remove temp file after retries: {e}")
+            except Exception as e:
+                self.error.emit(f"Could not remove temp file: {e}")
+        self._release_media()
+        QTimer.singleShot(120, attempt)
+
     def _on_media_status_changed(self, status):
         # EndOfMedia
-        if status == QMediaPlayer.MediaStatus.EndOfMedia:
-            self.finished.emit(self._current_path)
-            self._cleanup_file()
+        pass
 
     def set_auto_cleanup(self, enabled: bool):
         self._auto_cleanup = bool(enabled)
 
     def _cleanup_file(self):
         try:
-            if getattr(self, "auto_cleanup", True):
+            if getattr(self, "_auto_cleanup", True):
                 p = getattr(self, "_current_path", "")
                 if p and os.path.exists(p):
                     os.remove(p)

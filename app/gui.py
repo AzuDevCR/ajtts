@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox
 )
 from PySide6.QtGui import QPixmap, QKeySequence, QShortcut, QPalette, QBrush, QDesktopServices, QIcon
-from PySide6.QtCore import Qt, QObject, Signal, QThread, QEvent, QUrl
+from PySide6.QtCore import Qt, QObject, Signal, QThread, QEvent, QUrl, Slot
 
 # from model_manager_ui import ModelManagerWindow
 from app.tts_engine import AquaTTS
@@ -127,10 +127,10 @@ class AquaJupiterGUI(QMainWindow):
         self.audio = AudioController(self)
 
         # Playback Status
-        self.audio.started.connect(lambda p: (setattr(self, "speaking", True), self.msg.show("Speaking...")))
-        self.audio.finished.connect(lambda p: (setattr(self, "speaking", False), self.msg.show("Ready.")))
-        self.audio.stopped.connect(lambda: (setattr(self, "speaking", False), self.msg.show("Ready.")))
-        self.audio.error.connect(lambda m: self.msg.show(f"Audio error: {m}"))
+        self.audio.started.connect(self._on_audio_started)
+        self.audio.finished.connect(self._on_audio_finished)
+        self.audio.stopped.connect(self._on_audio_stopped)
+        self.audio.error.connect(self._on_audio_error)
 
         # --- Menu ---
         # menu_bar = QMenuBar()
@@ -215,8 +215,12 @@ class AquaJupiterGUI(QMainWindow):
         self.dial_rate.setFixedSize(DIAL_SIZE, DIAL_SIZE)
 
         rate_label = QLabel("Speed/Pitch")
+         # Pallete
+        palette = rate_label.palette()
+        palette.setColor(self.dial_rate.foregroundRole(), Qt.gray)
         rate_label.setAlignment(Qt.AlignCenter)
         rate_label.setFixedHeight(18)
+        rate_label.setPalette(palette)
 
         self.dial_rate.valueChanged.connect(lambda v: self.audio.set_rate(v / 100.0))
         left_panel.addWidget(self.dial_rate, 0, Qt.AlignHCenter)
@@ -233,6 +237,7 @@ class AquaJupiterGUI(QMainWindow):
         volume_label = QLabel("Volume")
         volume_label.setAlignment(Qt.AlignCenter)
         volume_label.setFixedHeight(18)
+        volume_label.setPalette(palette)
 
         self.dial_volume.valueChanged.connect(lambda v: self.audio.set_volume(v))
         left_panel.addWidget(self.dial_volume, 0, Qt.AlignHCenter)
@@ -270,16 +275,19 @@ class AquaJupiterGUI(QMainWindow):
         self.preload_worker.moveToThread(self.preload_thread)
 
         self.preload_thread.started.connect(self.preload_worker.run)
-        self.preload_worker.progress.connect(self.msg.show)
-        self.preload_worker.finished.connect(lambda ok: self.msg.show("Voices ready." if ok else "Some voices could not be prepared."))
+        # self.preload_worker.progress.connect(self.msg.show)
+        self.preload_worker.progress.connect(self._post_status)
+        # self.preload_worker.finished.connect(lambda ok: self.msg.show("Voices ready." if ok else "Some voices could not be prepared."))
         self.preload_worker.finished.connect(self._on_preload_finished)
+        # self.preload_worker.finished.connect(self._on_preload_finished_status)
+        # self.preload_worker.finished.connect(self._on_preload_finished)
 
         # Cleaning
         self.preload_worker.finished.connect(self.preload_thread.quit)
         self.preload_worker.finished.connect(self.preload_worker.deleteLater)
         self.preload_thread.finished.connect(self.preload_thread.deleteLater)
 
-        self.msg.show("Preparing built-in voices (first run only)...")
+        self._post_status("Preparing built-in voices (first run only)...")
         self.preload_thread.start()
 
         donate_button = QPushButton("Donate")
@@ -318,6 +326,48 @@ class AquaJupiterGUI(QMainWindow):
     #     self.model_window.model_deleted.connect(self.on_model_deleted)
     #     self.model_window.show()
 
+    @Slot(str)
+    def _on_audio_started(self, _path: str):
+        self.speaking = True
+        self._post_status("Speaking...")
+
+    @Slot(str)
+    def _on_audio_finished(self, _path: str):
+        self.speaking = False
+        if hasattr(self, "speak_btn"):
+            self.speak_btn.setEnabled(True)
+        self._post_status("Ready.")
+
+    @Slot()
+    def _on_audio_stopped(self):
+        self.speaking = False
+        if hasattr(self, "speak_btn"):
+            self.speak_btn.setEnabled(True)
+        self._post_status("Ready.")
+
+    @Slot(str)
+    def _on_audio_error(self, m: str):
+        self._post_status(f"Audio error: {m}")
+
+    @Slot(str)
+    def _post_status(self, msg: str):
+        self.msg.show(msg)
+
+    @Slot()
+    def _on_speech_started(self):
+        self.speaking = True
+        if hasattr(self, "speak_btn"):
+            self.speak_btn.setEnabled(False)
+        self._post_status("Synthesizing...")
+
+    @Slot(bool)
+    def _on_speech_finished(self, ok: bool):
+        self.speaking = False
+        if hasattr(self, "speak_btn"):
+            self.speak_btn.setEnabled(True)
+        self._post_status("Ready." if ok else "Error while synthesizing.")
+
+    @Slot(bool)
     def _on_preload_finished(self, ok: bool):
         idx = self.voice_combo.findData("tts_models/en/jenny/jenny")
         if idx != -1:
@@ -328,13 +378,17 @@ class AquaJupiterGUI(QMainWindow):
         if hasattr(self, "speak_btn"):
             self.speak_btn.setEnabled(True)
 
+    # @Slot(bool)
+    # def _on_preload_finished_status(self, ok: bool):
+    #     self._post_status("Voices ready." if ok else "Some voices could not be prepared.")
+        
     def speak_async(self, text: str):
         if not text or not self.tts_engine:
             return
         
         # No Overlaps
         if self.speaking:
-            self.msg.show("Already speaking...")
+            self._post_status("Already speaking...")
             return
         
         # A new thread for every new speech
@@ -348,14 +402,18 @@ class AquaJupiterGUI(QMainWindow):
 
         # Signals
         thread.started.connect(worker.run)
-        worker.progress.connect(self.msg.show)
+        # worker.progress.connect(self.msg.show)
+        worker.progress.connect(self._post_status)
 
-        worker.ready_wav.connect(lambda path: self.audio.play(path))
+        # worker.ready_wav.connect(lambda path: self.audio.play(path))
+        worker.ready_wav.connect(self.audio.play)
 
         # Disable btn while speaking
         if hasattr(self, "speak_btn"):
-            worker.progress.connect(lambda _=None: self.speak_btn.setEnabled(False))
-            worker.finished.connect(lambda _=None: self.speak_btn.setEnabled(True))
+            # worker.progress.connect(lambda _=None: self.speak_btn.setEnabled(False))
+            # worker.finished.connect(lambda _=None: self.speak_btn.setEnabled(True))
+            thread.started.connect(self._on_speech_started)
+            worker.finished.connect(self._on_speech_finished)
 
         # Cleaning
         
@@ -370,18 +428,18 @@ class AquaJupiterGUI(QMainWindow):
             return
         try:
             from app.tts_engine import debug_model_status
-            self.msg.show(debug_model_status(model_name))
+            self._post_status(debug_model_status(model_name))
             self.tts_engine = AquaTTS(model_name)
             info = getattr(self.tts_engine, "loaded_info", model_name)
-            self.msg.show(f"Model selected: {info}")
+            self._post_status(f"Model selected: {info}")
             print(f"[INFO] Active model set to: {info}")
         except Exception as e:
-            self.msg.show(f"Error loading model: {e}")
+            self._post_status(f"Error loading model: {e}")
             print(f"[ERROR] {e}")
 
     def speak_from_clipboard(self):
         if not getattr(self, "tts_engine", None):
-            self.msg.show("No model selected.")
+            self._post_status("No model selected.")
             return
 
         clipboard = QApplication.clipboard()
@@ -412,12 +470,12 @@ class AquaJupiterGUI(QMainWindow):
 
     def repeat_last(self):
         if not getattr(self, "tts_engine", None):
-            self.msg.show("No model selected.")
+            self._post_status("No model selected.")
             return
         if self.tts_engine.last_text:
             self.speak_async(self.last_text or "")
         else:
-            self.msg.show("No previous text to repeat.")
+            self._post_status("No previous text to repeat.")
 
     def show_processing_dialog(self, message):
         '''Progress bar for processing text'''
@@ -428,7 +486,7 @@ class AquaJupiterGUI(QMainWindow):
         dlg.setMinimumDuration(0)
         dlg.setValue(0)
         dlg.show()
-        QApplication.processEvents
+        QApplication.processEvents()
         self.processing_dialog = dlg
 
     def close_processing_dialog(self):

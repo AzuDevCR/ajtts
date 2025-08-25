@@ -2,7 +2,7 @@
 # Copyright (C) 2025  AzuDevCR (INL Creations)
 # Licensed under GPLv3 (see LICENSE file for details).
 
-import os
+import os, platform, shutil
 
 os.environ["PYTORCH_JIT"] = "0"
 try:
@@ -18,8 +18,6 @@ except Exception:
 
 import re
 import tempfile
-import platform
-import shutil
 import subprocess
 
 import torch, collections
@@ -37,6 +35,8 @@ except Exception:
 from pathlib import Path
 from TTS.api import TTS
 from TTS.utils.manage import ModelManager
+
+from PySide6.QtWidgets import QMessageBox
 
 os.environ["COQUI_TOS_AGREED"] = "1"
 
@@ -138,16 +138,64 @@ def _find_paths_in(folder: Path):
 # TEMP_AUDIO_DIR = Path(__file__).parent / ".." / "output" / "tmp"
 # TEMP_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
+def _maybe_locate_espeak_windows():
+   
+    candidates = []
+    bases = [os.environ.get('ProgramFiles'), os.environ.get('ProgramFiles(x86)'), os.environ.get('ProgramW6432')]
+    for base in filter(None, bases):
+        candidates += [
+            os.path.join(base, 'eSpeak NG', 'espeak-ng.exe'),
+            os.path.join(base, 'eSpeak', 'command_line', 'espeak.exe'),
+            # por si Chocolatey:
+            os.path.join('C:\\', 'ProgramData', 'chocolatey', 'bin', 'espeak-ng.exe'),
+            os.path.join('C:\\', 'ProgramData', 'chocolatey', 'bin', 'espeak.exe'),
+        ]
+    for exe in candidates:
+        if os.path.exists(exe):
+            bin_dir = os.path.dirname(exe)
+            # Preprender al PATH de la *sesión*
+            os.environ['PATH'] = bin_dir + os.pathsep + os.environ.get('PATH', '')
+            try:
+                import ctypes
+                ctypes.windll.kernel32.SetDllDirectoryW(bin_dir)
+            except Exception:
+                pass
+            return exe
+    return None
+
+def _ensure_espeak_available():
+    exe = shutil.which("espeak-ng") or shutil.which("espeak")
+    if not exe and platform.system() == "Windows":
+        exe = _maybe_locate_espeak_windows()
+    return exe
+
 class AquaTTS:
     def __init__(self, model_name: str):
-        if not shutil.which("espeak-ng") and not shutil.which("espeak"):
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.critical(
+        espeak_exe = _ensure_espeak_available()
+        if not espeak_exe:
+            sys = platform.system()
+            if sys == "Windows":
+                hint = (
+                    "Windows:\n"
+            "  • Option 1 (winget):   winget install -e --id eSpeak-NG.eSpeak-NG\n"
+            "  • Option 2 (Chocolatey):   choco install espeak-ng\n"
+            "  • Option 3: Download the MSI installer from GitHub (Releases of eSpeak-NG)\n\n"
+            "Typical path after install:\n"
+            "  C:\\Program Files\\eSpeak NG\\espeak-ng.exe"
+                )
+            elif sys == "Darwin":
+                hint = "macOS:\n  • brew install espeak-ng"
+            else:
+                hint = "Linux (Debian/Ubuntu):\n  • sudo apt install espeak-ng espeak"
+
+            QMessageBox.warning(
                 None,
-                "Missing Dependency",
-                "This model may require 'espeak-ng' o 'espeak'.\n"
-                "Install it with:\n\nsudo apt install espeak-ng espeak"
-            )
+                "Missing dependency: eSpeak NG",
+                "AquaJupiterTTS requires 'eSpeak NG' (or 'eSpeak') to run properly.\n"
+                "It is not installed or not found in PATH.\n\n"
+                "Please install it following the instructions below:\n\n"
+                + hint
+            )            
 
         self.model_name = model_name
         self.last_text = None
