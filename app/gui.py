@@ -3,6 +3,7 @@
 # Licensed under GPLv3 (see LICENSE file for details).
 
 
+from pathlib import Path
 import sys, os
 import threading
 
@@ -21,20 +22,17 @@ from app.tts_engine import ensure_preinstalled_models
 from app.playback import AudioController
 from app.normalize_es import normalize_es_numbers
 from app.normalize_en import normalize_text_en
+from app.tts_engine import safe_normalize, sanitize_for_andword_bug
 from app import __version__, __author__
 
-def resource_path(relative_path: str) -> str:
-    """
-    Retorna la ruta absoluta para un recurso, tanto si se corre
-    en AppImage como en venv.
-    """
-    if "APPDIR" in os.environ:
-        base_path = os.path.join(os.environ["APPDIR"], "usr")
+def resource_path(*parts: str) -> str:
+    
+    if getattr(sys, 'frozen', False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     else:
-        base_path = os.path.dirname(__file__)
-        base_path = os.path.abspath(os.path.join(base_path, ".."))
-
-    return os.path.join(base_path, relative_path)
+        # gui.py está en app/, nuestros assets en ../config/...
+        base = Path(__file__).resolve().parent.parent
+    return str((base.joinpath(*parts)).resolve())
 
 def getPath(relPath):
     if getattr(sys, 'frozen', False):
@@ -45,9 +43,7 @@ def getPath(relPath):
 
 BUILTIN_MODELS = [
     "tts_models/es/css10/vits",
-    "tts_models/en/jenny/jenny",
-    # "tts_models/en/ljspeech/vits--neon",
-    # "tts_models/en/ljspeech/vits",
+    "tts_models/en/ljspeech/vits",
 ]
 
 KOFI_URL = "https://ko-fi.com/inlcreations"
@@ -120,6 +116,8 @@ class AquaJupiterGUI(QMainWindow):
 
         self.setWindowTitle(f"AquaJupiterTTS v{__version__} by {__author__}")
         self.setFixedSize(770, 285)
+        icon_path = resource_path('config', 'icon', 'icon.ico')
+        self.setWindowIcon(QIcon(icon_path))
 
         self.speaking = False
         self.last_text = None
@@ -156,7 +154,7 @@ class AquaJupiterGUI(QMainWindow):
         # Background
         central_widget.setAutoFillBackground(True)
         central_widget.setContentsMargins(0,0,0,0)
-        self._bg_path = resource_path("config/backgrounds/rack_bg1.png")
+        self._bg_path = resource_path("config/backgrounds/rack_bg1.png").replace('\\', '/')
         self._bg_pix = QPixmap(self._bg_path) if self._bg_path else None
         central_widget.installEventFilter(self)
 
@@ -299,13 +297,11 @@ class AquaJupiterGUI(QMainWindow):
 
         self.voice_combo.clear()
         self.voice_combo.addItem("Español - CSS10 (VITS)", "tts_models/es/css10/vits")
-        self.voice_combo.addItem("English - Jenny", "tts_models/en/jenny/jenny")
-        # self.voice_combo.addItem("English - LJSpeech (VITS)", "tts_models/en/ljspeech/vits")
-        # self.voice_combo.addItem("English - LJSpeech (VITS) neon", "tts_models/en/ljspeech/vits--neon")
+        self.voice_combo.addItem("English - LjSpeech (VITS)", "tts_models/en/ljspeech/vits")
 
         # Default English
         for i in range(self.voice_combo.count()):
-            if self.voice_combo.itemData(i) == "tts_models/en/jenny/jenny":
+            if self.voice_combo.itemData(i) == "tts_models/en/ljspeech/vits":
                 self.voice_combo.setCurrentIndex(i)
                 break
 
@@ -369,7 +365,7 @@ class AquaJupiterGUI(QMainWindow):
 
     @Slot(bool)
     def _on_preload_finished(self, ok: bool):
-        idx = self.voice_combo.findData("tts_models/en/jenny/jenny")
+        idx = self.voice_combo.findData("tts_models/en/ljspeech/vits")
         if idx != -1:
             self.voice_combo.setCurrentIndex(idx)
 
@@ -455,8 +451,9 @@ class AquaJupiterGUI(QMainWindow):
                 if model_name.startswith("tts_models/es/"):
                     fixed_text = normalize_es_numbers(fixed_text, currency_default="CRC")
 
-                elif "jenny" in model_name:
-                    fixed_text = normalize_text_en(fixed_text)
+                elif model_name.startswith("tts_models/en/"):
+                    fixed_text = safe_normalize(normalize_text_en, fixed_text)
+                    fixed_text = sanitize_for_andword_bug(fixed_text)
 
             except Exception as e:
                 print(f"[normalizer warning] {e}")
@@ -536,7 +533,7 @@ class AquaJupiterGUI(QMainWindow):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    app.setWindowIcon(QIcon(resource_path("config/icon/icon.png")))
+    app.setWindowIcon(QIcon(resource_path("config/icon/icon.ico")))
     gui = AquaJupiterGUI()
     gui.show()
     sys.exit(app.exec())
