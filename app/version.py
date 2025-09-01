@@ -3,5 +3,5 @@
 # Licensed under GPLv3 (see LICENSE file for details).
 
 # app/version.py
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 __author__ = "AzuDevCR | INL Creations"

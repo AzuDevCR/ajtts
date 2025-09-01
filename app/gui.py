@@ -10,19 +10,20 @@ import threading
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QDial, QTextEdit, QProgressDialog,
-    QComboBox
+    QComboBox, QSplashScreen
 )
 from PySide6.QtGui import QPixmap, QKeySequence, QShortcut, QPalette, QBrush, QDesktopServices, QIcon
-from PySide6.QtCore import Qt, QObject, Signal, QThread, QEvent, QUrl, Slot
+from PySide6.QtCore import Qt, QObject, Signal, QThread, QEvent, QUrl, Slot, QTimer
 
 # from model_manager_ui import ModelManagerWindow
-from app.tts_engine import AquaTTS
-from app.tts_engine import repair_text
-from app.tts_engine import ensure_preinstalled_models
-from app.playback import AudioController
-from app.normalize_es import normalize_es_numbers
-from app.normalize_en import normalize_text_en
-from app.tts_engine import safe_normalize, sanitize_for_andword_bug
+
+# from app.tts_engine import AquaTTS
+# from app.tts_engine import repair_text
+# from app.tts_engine import ensure_preinstalled_models
+# from app.playback import AudioController
+# from app.normalize_es import normalize_es_numbers
+# from app.normalize_en import normalize_text_en
+# from app.tts_engine import safe_normalize, sanitize_for_andword_bug
 from app import __version__, __author__
 
 def resource_path(*parts: str) -> str:
@@ -76,6 +77,7 @@ class PreloadWorker(QObject):
         self.models = models
 
     def run(self):
+        from app.tts_engine import ensure_preinstalled_models
         def _log(msg):
             self.progress.emit(str(msg))
         try:
@@ -108,6 +110,8 @@ class SpeakWorker(QObject):
 class AquaJupiterGUI(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        from app.playback import AudioController
 
         BTN_W, BTN_H = 140, 36
         DIAL_SIZE = 72
@@ -285,7 +289,7 @@ class AquaJupiterGUI(QMainWindow):
         self.preload_worker.finished.connect(self.preload_worker.deleteLater)
         self.preload_thread.finished.connect(self.preload_thread.deleteLater)
 
-        self._post_status("Preparing built-in voices (first run only)...")
+        self._post_status("Preparing built-in voices...")
         self.preload_thread.start()
 
         donate_button = QPushButton("Donate")
@@ -423,6 +427,7 @@ class AquaJupiterGUI(QMainWindow):
         if not model_name:
             return
         try:
+            from app.tts_engine import AquaTTS, debug_model_status
             from app.tts_engine import debug_model_status
             self._post_status(debug_model_status(model_name))
             self.tts_engine = AquaTTS(model_name)
@@ -434,6 +439,10 @@ class AquaJupiterGUI(QMainWindow):
             print(f"[ERROR] {e}")
 
     def speak_from_clipboard(self):
+        from app.tts_engine import repair_text, safe_normalize, sanitize_for_andword_bug
+        from app.normalize_es import normalize_es_numbers
+        from app.normalize_en import normalize_text_en
+
         if not getattr(self, "tts_engine", None):
             self._post_status("No model selected.")
             return
@@ -533,7 +542,19 @@ class AquaJupiterGUI(QMainWindow):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    app.setWindowIcon(QIcon(resource_path("config/icon/icon.ico")))
-    gui = AquaJupiterGUI()
-    gui.show()
+    app.setWindowIcon(QIcon(resource_path("config/icon/icon.png")))
+
+    splash_pix = QPixmap(resource_path("config/waifus/lyra_splash.png"))
+    splash = QSplashScreen(splash_pix, Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
+    splash.show()
+    app.processEvents()  # <- fuerza que el splash se vea YA
+
+    # diferimos la creación de la GUI al siguiente ciclo
+    from PySide6.QtCore import QTimer
+    def build_gui():
+        gui = AquaJupiterGUI()
+        splash.finish(gui)
+        gui.show()
+
+    QTimer.singleShot(0, build_gui)
     sys.exit(app.exec())
