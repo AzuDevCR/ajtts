@@ -9,18 +9,20 @@ import threading
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QDial, QTextEdit, QProgressDialog,
-    QComboBox
+    QComboBox, QSplashScreen
 )
 from PySide6.QtGui import QPixmap, QKeySequence, QShortcut, QPalette, QBrush, QDesktopServices, QIcon
 from PySide6.QtCore import Qt, QObject, Signal, QThread, QEvent, QUrl
 
 # from model_manager_ui import ModelManagerWindow
-from app.tts_engine import AquaTTS
-from app.tts_engine import repair_text
-from app.tts_engine import ensure_preinstalled_models
-from app.playback import AudioController
-from app.normalize_es import normalize_es_numbers
-from app.normalize_en import normalize_text_en
+
+# from app.tts_engine import AquaTTS
+# from app.tts_engine import repair_text
+# from app.tts_engine import ensure_preinstalled_models
+# from app.playback import AudioController
+# from app.normalize_es import normalize_es_numbers
+# from app.normalize_en import normalize_text_en
+# from app.tts_engine import safe_normalize, sanitize_for_andword_bug
 from app import __version__, __author__
 
 def resource_path(relative_path: str) -> str:
@@ -45,9 +47,7 @@ def getPath(relPath):
 
 BUILTIN_MODELS = [
     "tts_models/es/css10/vits",
-    "tts_models/en/jenny/jenny",
-    # "tts_models/en/ljspeech/vits--neon",
-    # "tts_models/en/ljspeech/vits",
+    "tts_models/en/ljspeech/vits",
 ]
 
 KOFI_URL = "https://ko-fi.com/inlcreations"
@@ -80,6 +80,8 @@ class PreloadWorker(QObject):
         self.models = models
 
     def run(self):
+        from app.tts_engine import ensure_preinstalled_models
+
         def _log(msg):
             self.progress.emit(str(msg))
         try:
@@ -113,6 +115,8 @@ class AquaJupiterGUI(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        from app.playback import AudioController
+
         BTN_W, BTN_H = 140, 36
         DIAL_SIZE = 72
         PADDING = 10
@@ -120,6 +124,7 @@ class AquaJupiterGUI(QMainWindow):
 
         self.setWindowTitle(f"AquaJupiterTTS v{__version__} by {__author__}")
         self.setFixedSize(770, 285)
+        self.centerOnScreen()
 
         self.speaking = False
         self.last_text = None
@@ -279,7 +284,7 @@ class AquaJupiterGUI(QMainWindow):
         self.preload_worker.finished.connect(self.preload_worker.deleteLater)
         self.preload_thread.finished.connect(self.preload_thread.deleteLater)
 
-        self.msg.show("Preparing built-in voices (first run only)...")
+        self.msg.show("Preparing built-in voices...")
         self.preload_thread.start()
 
         donate_button = QPushButton("Donate")
@@ -291,13 +296,13 @@ class AquaJupiterGUI(QMainWindow):
 
         self.voice_combo.clear()
         self.voice_combo.addItem("Español - CSS10 (VITS)", "tts_models/es/css10/vits")
-        self.voice_combo.addItem("English - Jenny", "tts_models/en/jenny/jenny")
+        self.voice_combo.addItem("English - LjSpeech (VITS)", "tts_models/en/ljspeech/vits")
         # self.voice_combo.addItem("English - LJSpeech (VITS)", "tts_models/en/ljspeech/vits")
         # self.voice_combo.addItem("English - LJSpeech (VITS) neon", "tts_models/en/ljspeech/vits--neon")
 
         # Default English
         for i in range(self.voice_combo.count()):
-            if self.voice_combo.itemData(i) == "tts_models/en/jenny/jenny":
+            if self.voice_combo.itemData(i) == "tts_models/en/ljspeech/vits":
                 self.voice_combo.setCurrentIndex(i)
                 break
 
@@ -318,8 +323,18 @@ class AquaJupiterGUI(QMainWindow):
     #     self.model_window.model_deleted.connect(self.on_model_deleted)
     #     self.model_window.show()
 
+    #----------------center-----------------
+    def centerOnScreen(self):
+        screen = QApplication.primaryScreen()
+        screen_geometry = screen.availableGeometry()
+        window_geometry = self.frameGeometry()
+        center_point = screen_geometry.center()
+        window_geometry.moveCenter(center_point)
+        self.move(window_geometry.topLeft())
+    #----------------center-----------------
+
     def _on_preload_finished(self, ok: bool):
-        idx = self.voice_combo.findData("tts_models/en/jenny/jenny")
+        idx = self.voice_combo.findData("tts_models/en/ljspeech/vits")
         if idx != -1:
             self.voice_combo.setCurrentIndex(idx)
 
@@ -369,6 +384,7 @@ class AquaJupiterGUI(QMainWindow):
         if not model_name:
             return
         try:
+            from app.tts_engine import AquaTTS, debug_model_status
             from app.tts_engine import debug_model_status
             self.msg.show(debug_model_status(model_name))
             self.tts_engine = AquaTTS(model_name)
@@ -380,6 +396,11 @@ class AquaJupiterGUI(QMainWindow):
             print(f"[ERROR] {e}")
 
     def speak_from_clipboard(self):
+
+        from app.tts_engine import repair_text, safe_normalize, sanitize_for_andword_bug
+        from app.normalize_es import normalize_es_numbers
+        from app.normalize_en import normalize_text_en
+
         if not getattr(self, "tts_engine", None):
             self.msg.show("No model selected.")
             return
@@ -397,8 +418,9 @@ class AquaJupiterGUI(QMainWindow):
                 if model_name.startswith("tts_models/es/"):
                     fixed_text = normalize_es_numbers(fixed_text, currency_default="CRC")
 
-                elif "jenny" in model_name:
-                    fixed_text = normalize_text_en(fixed_text)
+                elif model_name.startswith("tts_models/en/"):
+                    fixed_text = safe_normalize(normalize_text_en, fixed_text)
+                    fixed_text = sanitize_for_andword_bug(fixed_text)
 
             except Exception as e:
                 print(f"[normalizer warning] {e}")
@@ -479,6 +501,17 @@ class AquaJupiterGUI(QMainWindow):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon(resource_path("config/icon/icon.png")))
-    gui = AquaJupiterGUI()
-    gui.show()
+
+    splash_pix = QPixmap(resource_path("config/waifus/lyra_splash.png"))
+    splash = QSplashScreen(splash_pix, Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
+    splash.show()
+    app.processEvents()
+
+    from PySide6.QtCore import QTimer
+    def build_gui():
+        gui = AquaJupiterGUI()
+        splash.finish(gui)
+        gui.show()
+
+    QTimer.singleShot(0, build_gui)
     sys.exit(app.exec())

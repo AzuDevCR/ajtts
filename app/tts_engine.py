@@ -2,6 +2,9 @@
 # Copyright (C) 2025  AzuDevCR (INL Creations)
 # Licensed under GPLv3 (see LICENSE file for details).
 
+
+import sys
+import logging
 import os
 
 os.environ["PYTORCH_JIT"] = "0"
@@ -44,7 +47,67 @@ from glob import glob
 
 ASSETS_MODELS_DIR = Path(__file__).resolve().parent / "assets" / "models"
 CACHE_DIR = Path.home() / ".local" / "share" / "tts"
+_DIGITS_0_19 = ["zero","one","two","three","four","five","six","seven","eight","nine",
+                "ten","eleven","twelve","thirteen","fourteen","fifteen",
+                "sixteen","seventeen","eighteen","nineteen"]
+_TENS = {20:"twenty",30:"thirty",40:"forty",50:"fifty",60:"sixty",
+         70:"seventy",80:"eighty",90:"ninety"}
+
 model_manager = ModelManager()
+
+logger = logging.getLogger("ajtts")
+if not logger.handlers:
+    h = logging.StreamHandler(sys.stderr)
+    h.setLevel(logging.WARNING)
+    logger.addHandler(h)
+logger.setLevel(logging.WARNING)
+
+def safe_normalize(func, text, *args, **kwargs):
+    try:
+        return func(text, *args, **kwargs)
+    except TypeError as e:
+        if "andword" in str(e):
+            logger.warning("[andword] normalization skipped. Falling back to safe text. Input=%r", text)
+            return " "
+        raise
+
+def _num_to_words_en(n: int) -> str:
+    if n < 20:
+        return _DIGITS_0_19[n]
+    if n < 100:
+        t = (n // 10) * 10
+        r = n % 10
+        return _TENS[t] + ("" if r == 0 else f"-{_DIGITS_0_19[r]}")
+    if n < 1000:
+        h = n // 100
+        r = n % 100
+        return _DIGITS_0_19[h] + " hundred" + ("" if r == 0 else f" {_num_to_words_en(r)}")
+    if n < 10000:
+        th = n // 1000
+        r = n % 1000
+        return _DIGITS_0_19[th] + " thousand" + ("" if r == 0 else f" {_num_to_words_en(r)}")
+    return str(n)
+
+def _split_alnum_en(text: str) -> str:
+    # "M2" -> "M two", "USB3" -> "USB three"
+    def repl(m):
+        letters, digits = m.group(1), int(m.group(2))
+        return f"{letters} {_num_to_words_en(digits)}"
+    return re.sub(r"\b([A-Za-z]{1,4})(\d{1,4})\b", repl, text)
+
+def _replace_standalone_numbers_en(text: str) -> str:
+    # "1984" -> "one thousand nine hundred eighty-four"; "2" -> "two"
+    def repl(m):
+        try:
+            return _num_to_words_en(int(m.group(0)))
+        except Exception:
+            return m.group(0)
+    return re.sub(r"\b\d{1,4}\b", repl, text)
+
+def sanitize_for_andword_bug(text: str) -> str:
+    t = _split_alnum_en(text)
+    t = _replace_standalone_numbers_en(t)
+    return t
 
 def _norm(model_id: str) -> str:
     return model_id.replace("/", "--")
@@ -202,6 +265,15 @@ class AquaTTS:
 
         try:
             self.tts.tts_to_file(text=text, file_path=str(tmp_path))
+        except TypeError as e:
+            if "andword" in str(e):
+                logger.warning("[andword] retrying with sanitized text")
+                safe_text = sanitize_for_andword_bug(text)
+                if not safe_text.strip():
+                    safe_text = " "
+                self.tts.tts_to_file(text=safe_text, file_path=str(tmp_path))
+            else:
+                raise
         except AttributeError:
             raise RuntimeError("This TTS backend lacks tts_to_file(...)")
         return str(tmp_path)
